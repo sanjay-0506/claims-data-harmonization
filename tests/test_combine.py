@@ -50,8 +50,9 @@ def prepare_source_c():
     _, _, source_c, dictionary = load_data()
 
     df = standardize_source_c(source_c)
-    df = clean_source_c(df)
+    df, _ = clean_source_c(df)
     df, _ = filter_valid_records(df)
+
     df = process_source_c_diagnosis(df)
     df = enrich_diagnosis(df, dictionary)
 

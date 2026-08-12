@@ -50,7 +50,7 @@ def test_source_c_diagnosis():
     _, _, source_c, _ = load_data()
 
     df = standardize_source_c(source_c)
-    df = clean_source_c(df)
+    df, _ = clean_source_c(df)
     df = process_source_c_diagnosis(df)
 
     assert "DIAGNOSIS_CODE" in df.columns

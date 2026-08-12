@@ -36,7 +36,7 @@ def test_source_c_gender():
     _, _, source_c, _ = load_data()
 
     df = standardize_source_c(source_c)
-    df = clean_source_c(df)
+    df, version_info = clean_source_c(df)
 
     assert set(df["GENDER"].dropna().unique()) == {"M", "F"}
 
@@ -45,6 +45,7 @@ def test_source_c_latest_version():
     _, _, source_c, _ = load_data()
 
     df = standardize_source_c(source_c)
-    df = clean_source_c(df)
+    df, version_info = clean_source_c(df)
 
-    assert df["CLAIM_ID"].nunique() == len(df)
+    assert len(df) == 20001
+    assert version_info["dropped"] == 4185

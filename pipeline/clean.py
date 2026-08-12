@@ -40,11 +40,16 @@ def clean_source_b(df):
 def clean_source_c(df):
     df = df.copy()
 
-    # Keep the latest version of each claim
+    rows_in = len(df)
+
     df = (
         df.sort_values("version")
-          .drop_duplicates("CLAIM_ID", keep="last")
+        .drop_duplicates("CLAIM_ID", keep="last")
     )
+
+    rows_out = len(df)
+
+    dropped = rows_in - rows_out
 
     df["SERVICE_DATE"] = pd.to_datetime(
         df["SERVICE_DATE"],
@@ -58,7 +63,16 @@ def clean_source_c(df):
 
     df["SRC"] = "SRC_C"
 
-    return df
+    version_info = {
+        "rows_in": rows_in,
+        "rows_out": rows_out,
+        "dropped": dropped,
+        "reason": {
+            "superseded_claim_version": dropped
+        }
+    }
+
+    return df, version_info
 
 def filter_valid_records(df):
     df = df.copy()
