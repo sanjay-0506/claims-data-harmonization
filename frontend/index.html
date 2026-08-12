@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Claims Harmonization</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 30px;
+            background: #f5f5f5;
+            color: #222;
+        }
+
+        h1 {
+            margin-bottom: 5px;
+        }
+
+        button {
+            padding: 10px 18px;
+            border: none;
+            background: #222;
+            color: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: #444;
+        }
+
+        .run-id {
+            margin: 15px 0;
+            font-size: 14px;
+        }
+
+        .section {
+            background: white;
+            padding: 20px;
+            margin-top: 20px;
+            border-radius: 6px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th,
+        td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background: #eee;
+        }
+
+        .pass {
+            color: green;
+            font-weight: bold;
+        }
+
+        .fail {
+            color: red;
+            font-weight: bold;
+        }
+
+        .summary {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .summary-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            min-width: 150px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Claims Data Harmonization</h1>
+
+    <p>
+        Multi-source claims processing pipeline
+    </p>
+
+    <button onclick="runPipeline()">
+        Run Pipeline
+    </button>
+
+    <div class="run-id" id="runId"></div>
+
+    <div class="section">
+        <h2>Run Summary</h2>
+
+        <div class="summary" id="summary">
+            <p>No run yet.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Pipeline Stages</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Stage</th>
+                    <th>Rows In</th>
+                    <th>Rows Out</th>
+                    <th>Dropped</th>
+                    <th>Reasons</th>
+                </tr>
+            </thead>
+
+            <tbody id="stages">
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Acceptance Checks</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Check</th>
+                    <th>Result</th>
+                    <th>Actual</th>
+                    <th>Expected</th>
+                </tr>
+            </thead>
+
+            <tbody id="checks">
+            </tbody>
+        </table>
+    </div>
+
+
+    <script>
+
+        const API_URL = "http://127.0.0.1:8000";
+
+
+        async function runPipeline() {
+
+            document.getElementById("stages").innerHTML = "";
+            document.getElementById("checks").innerHTML = "";
+
+            document.getElementById("runId").innerText =
+                "Running pipeline...";
+
+            const response = await fetch(
+                `${API_URL}/run`,
+                {
+                    method: "POST"
+                }
+            );
+
+            const data = await response.json();
+
+            const runId = data.run_id;
+
+            document.getElementById("runId").innerText =
+                `Run ID: ${runId}`;
+
+            await loadStages(runId);
+            await loadValidation(runId);
+            await loadSummary();
+        }
+
+
+        async function loadStages(runId) {
+
+            const response = await fetch(
+                `${API_URL}/run/${runId}/stages`
+            );
+
+            const data = await response.json();
+
+            const table = document.getElementById("stages");
+
+            data.stages.forEach(stage => {
+
+                const row = document.createElement("tr");
+
+                const reasons = Object.entries(
+                    stage.reasons
+                )
+                .map(
+                    ([key, value]) =>
+                        `${key}: ${value}`
+                )
+                .join("<br>");
+
+                row.innerHTML = `
+                    <td>${stage.stage}</td>
+                    <td>${stage.rows_in}</td>
+                    <td>${stage.rows_out}</td>
+                    <td>${stage.dropped}</td>
+                    <td>${reasons}</td>
+                `;
+
+                table.appendChild(row);
+            });
+        }
+
+
+        async function loadValidation(runId) {
+
+            const response = await fetch(
+                `${API_URL}/run/${runId}/validate`
+            );
+
+            const data = await response.json();
+
+            const table = document.getElementById("checks");
+
+            Object.entries(data.checks).forEach(
+                ([name, check]) => {
+
+                    const row = document.createElement("tr");
+
+                    const status = check.passed
+                        ? "PASS"
+                        : "FAIL";
+
+                    const statusClass = check.passed
+                        ? "pass"
+                        : "fail";
+
+                    row.innerHTML = `
+                        <td>${name}</td>
+                        <td class="${statusClass}">
+                            ${status}
+                        </td>
+                        <td>
+                            ${check.actual ?? ""}
+                        </td>
+                        <td>
+                            ${check.expected ?? ""}
+                        </td>
+                    `;
+
+                    table.appendChild(row);
+                }
+            );
+        }
+
+
+        async function loadSummary() {
+
+            const response = await fetch(
+                `${API_URL}/summary`
+            );
+
+            const data = await response.json();
+
+            const container =
+                document.getElementById("summary");
+
+            container.innerHTML = "";
+
+            if (data.runs.length === 0) {
+
+                container.innerHTML =
+                    "<p>No runs yet.</p>";
+
+                return;
+            }
+
+            const latest =
+                data.runs[data.runs.length - 1];
+
+            container.innerHTML = `
+                <div class="summary-card">
+                    <strong>Rows</strong>
+                    <br>
+                    ${latest.rows}
+                </div>
+
+                <div class="summary-card">
+                    <strong>Claims</strong>
+                    <br>
+                    ${latest.claims}
+                </div>
+
+                <div class="summary-card">
+                    <strong>Patients</strong>
+                    <br>
+                    ${latest.patients}
+                </div>
+
+                <div class="summary-card">
+                    <strong>Diagnosis Codes</strong>
+                    <br>
+                    ${latest.diagnosis_codes}
+                </div>
+            `;
+        }
+
+    </script>
+
+</body>
+
+</html>

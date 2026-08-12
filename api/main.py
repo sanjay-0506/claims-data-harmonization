@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from uuid import uuid4
-
+from fastapi.middleware.cors import CORSMiddleware
 from pipeline.pipeline import run_pipeline
 from pipeline.validation import (
     validate_output,
@@ -11,7 +11,13 @@ from pipeline.validation import (
 app = FastAPI(
     title="Claims Data Harmonization API"
 )
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 runs = {}
 
