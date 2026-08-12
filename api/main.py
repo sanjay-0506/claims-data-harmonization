@@ -2,7 +2,10 @@ from fastapi import FastAPI
 from uuid import uuid4
 
 from pipeline.pipeline import run_pipeline
-from pipeline.validation import validate_output
+from pipeline.validation import (
+    validate_output,
+    validate_deterministic_run
+)
 
 
 app = FastAPI(
@@ -54,6 +57,12 @@ def validate_run(run_id: str):
     output = runs[run_id]["output"]
 
     results = validate_output(output)
+
+    deterministic = validate_deterministic_run(
+        run_pipeline
+    )
+
+    results["deterministic_output"] = deterministic
 
     return {
         "run_id": run_id,
