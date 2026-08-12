@@ -26,20 +26,28 @@ def process_source_a_diagnosis(df):
         "diagnosis_code_8"
     ]
 
-    rows = []
+    df = df.copy()
 
-    for _, row in df.iterrows():
-        for column in diagnosis_columns:
-            code = normalize_code(row[column])
+    df = df.melt(
+        id_vars=[
+            col for col in df.columns
+            if col not in diagnosis_columns
+        ],
+        value_vars=diagnosis_columns,
+        value_name="DIAGNOSIS_CODE"
+    )
 
-            if code is None:
-                continue
+    df["DIAGNOSIS_CODE"] = df["DIAGNOSIS_CODE"].apply(
+        normalize_code
+    )
 
-            new_row = row.copy()
-            new_row["DIAGNOSIS_CODE"] = code
-            rows.append(new_row)
+    df = df.dropna(
+        subset=["DIAGNOSIS_CODE"]
+    )
 
-    return pd.DataFrame(rows)
+    return df.drop(
+        columns=["variable"]
+    )
 
 
 def process_source_b_diagnosis(df):
@@ -49,29 +57,33 @@ def process_source_b_diagnosis(df):
         normalize_code
     )
 
+    df = df.dropna(
+        subset=["DIAGNOSIS_CODE"]
+    )
+
     return df
 
 
 def process_source_c_diagnosis(df):
-    rows = []
+    df = df.copy()
 
-    for _, row in df.iterrows():
-        if pd.isna(row["diagnosis_codes"]):
-            continue
+    df["diagnosis_codes"] = df["diagnosis_codes"].fillna("")
 
-        codes = str(row["diagnosis_codes"]).split("|")
+    df["DIAGNOSIS_CODE"] = df["diagnosis_codes"].str.split("|")
 
-        for code in codes:
-            code = normalize_code(code)
+    df = df.explode(
+        "DIAGNOSIS_CODE"
+    )
 
-            if code is None:
-                continue
+    df["DIAGNOSIS_CODE"] = df["DIAGNOSIS_CODE"].apply(
+        normalize_code
+    )
 
-            new_row = row.copy()
-            new_row["DIAGNOSIS_CODE"] = code
-            rows.append(new_row)
+    df = df.dropna(
+        subset=["DIAGNOSIS_CODE"]
+    )
 
-    return pd.DataFrame(rows)
+    return df
 
 
 def remove_duplicate_diagnoses(df):
