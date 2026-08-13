@@ -115,43 +115,66 @@ def validate_output(df):
     }
 
     return results
+def compare_outputs(first_output, second_output):
+    import pandas as pd
 
-def validate_deterministic_run(run_pipeline):
-    first_output, _ = run_pipeline()
-    second_output, _ = run_pipeline()
+    columns = [
+        "SRC",
+        "ZIP3",
+        "BIRTH_YEAR",
+        "SERVICE_DATE",
+        "DIAGNOSIS_CODE",
+        "DIAGNOSIS_DESC",
+        "PLACE_OF_SERVICE",
+        "RENDERING_NPI",
+        "REFERRING_NPI",
+        "BILLING_NPI",
+        "PATIENT_ID",
+        "CLAIM_ID",
+        "PRIMARY_PLAN_ID",
+        "BILLED_AMOUNT",
+        "GENDER"
+    ]
 
-    first_output = first_output.sort_values(
-        [
-            "SRC",
-            "CLAIM_ID",
-            "DIAGNOSIS_CODE"
-        ]
-    ).reset_index(drop=True)
+    first = (
+        first_output[columns]
+        .sort_values(
+            ["SRC", "CLAIM_ID", "DIAGNOSIS_CODE"]
+        )
+        .reset_index(drop=True)
+    )
 
-    second_output = second_output.sort_values(
-        [
-            "SRC",
-            "CLAIM_ID",
-            "DIAGNOSIS_CODE"
-        ]
-    ).reset_index(drop=True)
+    second = (
+        second_output[columns]
+        .sort_values(
+            ["SRC", "CLAIM_ID", "DIAGNOSIS_CODE"]
+        )
+        .reset_index(drop=True)
+    )
 
     try:
         pd.testing.assert_frame_equal(
-            first_output,
-            second_output,
+            first,
+            second,
             check_dtype=False
         )
 
-        return {
-            "passed": True,
-            "actual": True,
-            "expected": True
-        }
+        return True
 
     except AssertionError:
-        return {
-            "passed": False,
-            "actual": False,
-            "expected": True
-        }
+        return False        
+
+def validate_deterministic_run(first_output, run_pipeline):
+    second_output, _ = run_pipeline()
+
+    passed = compare_outputs(
+        first_output,
+        second_output
+    )
+
+    return {
+        "passed": passed,
+        "actual": passed,
+        "expected": True
+    }
+        

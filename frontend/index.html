@@ -3,11 +3,19 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Claims Harmonization</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Claims Data Harmonization</title>
 
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -20,8 +28,13 @@
             margin-bottom: 5px;
         }
 
+        h2 {
+            margin-top: 0;
+        }
+
         button {
             padding: 10px 18px;
+            margin-right: 8px;
             border: none;
             background: #222;
             color: white;
@@ -33,8 +46,18 @@
             background: #444;
         }
 
+        button:disabled {
+            background: #aaa;
+            cursor: not-allowed;
+        }
+
         .run-id {
-            margin: 15px 0;
+            margin: 15px 0 5px;
+            font-size: 14px;
+        }
+
+        .status {
+            margin: 8px 0;
             font-size: 14px;
         }
 
@@ -72,6 +95,21 @@
             font-weight: bold;
         }
 
+        .running {
+            color: #b36b00;
+            font-weight: bold;
+        }
+
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+
         .summary {
             display: flex;
             gap: 20px;
@@ -82,9 +120,20 @@
             border: 1px solid #ddd;
             padding: 15px;
             min-width: 150px;
+            background: #fafafa;
+        }
+
+        .summary-card strong {
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        .download-section {
+            margin-top: 15px;
         }
     </style>
 </head>
+
 
 <body>
 
@@ -94,25 +143,73 @@
         Multi-source claims processing pipeline
     </p>
 
-    <button onclick="runPipeline()">
+
+    <!-- ACTION BUTTONS -->
+
+    <button
+        id="runButton"
+        onclick="runPipeline()"
+    >
         Run Pipeline
     </button>
 
-    <div class="run-id" id="runId"></div>
 
-    <div class="section">
-        <h2>Run Summary</h2>
+    <button
+        id="downloadButton"
+        onclick="downloadDataset()"
+        disabled
+    >
+        Download Final Dataset
+    </button>
 
-        <div class="summary" id="summary">
-            <p>No run yet.</p>
-        </div>
+
+    <!-- RUN INFORMATION -->
+
+    <div
+        class="run-id"
+        id="runId"
+    >
+        No run started.
     </div>
 
+
+    <div
+        class="status"
+        id="pipelineStatus"
+    >
+    </div>
+
+
+    <!-- RUN SUMMARY -->
+
     <div class="section">
+
+        <h2>Run Summary</h2>
+
+        <div
+            class="summary"
+            id="summary"
+        >
+
+            <p class="loading">
+                No run yet.
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <!-- PIPELINE STAGES -->
+
+    <div class="section">
+
         <h2>Pipeline Stages</h2>
 
         <table>
+
             <thead>
+
                 <tr>
                     <th>Stage</th>
                     <th>Rows In</th>
@@ -120,29 +217,73 @@
                     <th>Dropped</th>
                     <th>Reasons</th>
                 </tr>
+
             </thead>
 
             <tbody id="stages">
+
+                <tr>
+
+                    <td
+                        colspan="5"
+                        class="loading"
+                    >
+                        No pipeline run yet.
+                    </td>
+
+                </tr>
+
             </tbody>
+
         </table>
+
     </div>
 
+
+    <!-- ACCEPTANCE CHECKS -->
+
     <div class="section">
+
         <h2>Acceptance Checks</h2>
 
+        <div
+            id="validationStatus"
+            class="running"
+        >
+            Acceptance checks have not started.
+        </div>
+
+
         <table>
+
             <thead>
+
                 <tr>
                     <th>Check</th>
                     <th>Result</th>
                     <th>Actual</th>
                     <th>Expected</th>
                 </tr>
+
             </thead>
 
             <tbody id="checks">
+
+                <tr>
+
+                    <td
+                        colspan="4"
+                        class="loading"
+                    >
+                        Waiting for pipeline run.
+                    </td>
+
+                </tr>
+
             </tbody>
+
         </table>
+
     </div>
 
 
@@ -151,105 +292,391 @@
         const API_URL = "http://127.0.0.1:8000";
 
 
+        /*
+         * Convert internal validation names
+         * into readable names.
+         */
+        function formatCheckName(name) {
+
+            const names = {
+
+                total_rows:
+                    "Total rows",
+
+                distinct_claims:
+                    "Distinct claims",
+
+                distinct_patients:
+                    "Distinct patients",
+
+                distinct_diagnosis_codes:
+                    "Distinct diagnosis codes",
+
+                P00042_distinct_diagnosis_codes:
+                    "P00042 - distinct diagnosis codes",
+
+                P00042_total_rows:
+                    "P00042 - total rows",
+
+                diagnosis_codes_valid:
+                    "Diagnosis codes - uppercase and no dots",
+
+                service_dates_valid:
+                    "Service dates within required range",
+
+                patient_ids_valid:
+                    "No empty patient IDs",
+
+                deterministic_output:
+                    "Two consecutive runs produce identical output"
+            };
+
+            return names[name] || name;
+        }
+
+
+        /*
+         * Reset the page before starting
+         * a new pipeline run.
+         */
+        function resetPage() {
+
+            document.getElementById(
+                "runId"
+            ).innerText =
+                "Starting pipeline...";
+
+
+            document.getElementById(
+                "pipelineStatus"
+            ).innerText =
+                "Pipeline is running...";
+
+
+            document.getElementById(
+                "pipelineStatus"
+            ).className =
+                "status running";
+
+
+            document.getElementById(
+                "downloadButton"
+            ).disabled = true;
+
+
+            document.getElementById(
+                "summary"
+            ).innerHTML = `
+                <p class="loading">
+                    Pipeline is running...
+                </p>
+            `;
+
+
+            document.getElementById(
+                "stages"
+            ).innerHTML = `
+                <tr>
+                    <td
+                        colspan="5"
+                        class="loading"
+                    >
+                        Loading pipeline stages...
+                    </td>
+                </tr>
+            `;
+
+
+            document.getElementById(
+                "validationStatus"
+            ).innerText =
+                "Waiting for pipeline to finish...";
+
+
+            document.getElementById(
+                "validationStatus"
+            ).className =
+                "running";
+
+
+            document.getElementById(
+                "checks"
+            ).innerHTML = `
+                <tr>
+                    <td
+                        colspan="4"
+                        class="loading"
+                    >
+                        Acceptance checks will run
+                        after the pipeline finishes.
+                    </td>
+                </tr>
+            `;
+        }
+
+
+        /*
+         * Start the pipeline.
+         */
         async function runPipeline() {
 
-            document.getElementById("stages").innerHTML = "";
-            document.getElementById("checks").innerHTML = "";
+            const runButton =
+                document.getElementById(
+                    "runButton"
+                );
 
-            document.getElementById("runId").innerText =
-                "Running pipeline...";
 
-            const response = await fetch(
-                `${API_URL}/run`,
-                {
-                    method: "POST"
+            runButton.disabled = true;
+
+            runButton.innerText =
+                "Running...";
+
+
+            resetPage();
+
+
+            try {
+
+                /*
+                 * Start pipeline.
+                 */
+                const response =
+                    await fetch(
+                        `${API_URL}/run`,
+                        {
+                            method: "POST"
+                        }
+                    );
+
+
+                if (!response.ok) {
+
+                    throw new Error(
+                        "Pipeline request failed."
+                    );
                 }
-            );
-
-            const data = await response.json();
-
-            const runId = data.run_id;
-
-            document.getElementById("runId").innerText =
-                `Run ID: ${runId}`;
-
-            await loadStages(runId);
-            await loadValidation(runId);
-            await loadSummary();
-        }
 
 
-        async function loadStages(runId) {
+                const data =
+                    await response.json();
 
-            const response = await fetch(
-                `${API_URL}/run/${runId}/stages`
-            );
 
-            const data = await response.json();
+                const runId =
+                    data.run_id;
 
-            const table = document.getElementById("stages");
 
-            data.stages.forEach(stage => {
+                /*
+                 * Show run ID.
+                 */
+                document.getElementById(
+                    "runId"
+                ).innerText =
+                    `Run ID: ${runId}`;
 
-                const row = document.createElement("tr");
 
-                const reasons = Object.entries(
-                    stage.reasons
-                )
-                .map(
-                    ([key, value]) =>
-                        `${key}: ${value}`
-                )
-                .join("<br>");
+                /*
+                 * Pipeline itself has completed.
+                 */
+                document.getElementById(
+                    "pipelineStatus"
+                ).innerText =
+                    "Pipeline completed. Loading results...";
 
-                row.innerHTML = `
-                    <td>${stage.stage}</td>
-                    <td>${stage.rows_in}</td>
-                    <td>${stage.rows_out}</td>
-                    <td>${stage.dropped}</td>
-                    <td>${reasons}</td>
+
+                /*
+                 * Load summary immediately.
+                 */
+                await loadSummary(runId);
+
+
+                /*
+                 * Load stages.
+                 */
+                await loadStages(runId);
+
+
+                /*
+                 * Tell user validation is running.
+                 */
+                document.getElementById(
+                    "validationStatus"
+                ).innerText =
+                    "Running acceptance checks... Please wait.";
+
+
+                document.getElementById(
+                    "validationStatus"
+                ).className =
+                    "running";
+
+
+                /*
+                 * Show explicit loading state.
+                 */
+                document.getElementById(
+                    "checks"
+                ).innerHTML = `
+                    <tr>
+                        <td
+                            colspan="4"
+                            class="running"
+                        >
+                            Running acceptance checks...
+                            Please wait.
+                        </td>
+                    </tr>
                 `;
 
-                table.appendChild(row);
-            });
+
+                /*
+                 * Validation can take time because
+                 * deterministic validation runs the
+                 * pipeline once more.
+                 */
+                await loadValidation(runId);
+
+
+                /*
+                 * Enable download only after
+                 * validation is finished.
+                 */
+                document.getElementById(
+                    "downloadButton"
+                ).disabled = false;
+
+
+                /*
+                 * Refresh summary.
+                 */
+                await loadSummary(runId);
+
+
+                document.getElementById(
+                    "pipelineStatus"
+                ).innerText =
+                    "Pipeline and acceptance checks completed.";
+
+
+                document.getElementById(
+                    "pipelineStatus"
+                ).className =
+                    "status pass";
+
+
+            } catch (error) {
+
+                console.error(error);
+
+
+                document.getElementById(
+                    "pipelineStatus"
+                ).innerText =
+                    `Error: ${error.message}`;
+
+
+                document.getElementById(
+                    "pipelineStatus"
+                ).className =
+                    "status error";
+
+
+                document.getElementById(
+                    "validationStatus"
+                ).innerText =
+                    "Validation could not be completed.";
+
+
+                document.getElementById(
+                    "validationStatus"
+                ).className =
+                    "error";
+
+            } finally {
+
+                runButton.disabled = false;
+
+                runButton.innerText =
+                    "Run Pipeline";
+            }
         }
 
 
-        async function loadValidation(runId) {
+        /*
+         * Load pipeline stages.
+         */
+        async function loadStages(runId) {
 
-            const response = await fetch(
-                `${API_URL}/run/${runId}/validate`
-            );
+            const response =
+                await fetch(
+                    `${API_URL}/run/${runId}/stages`
+                );
 
-            const data = await response.json();
 
-            const table = document.getElementById("checks");
+            if (!response.ok) {
 
-            Object.entries(data.checks).forEach(
-                ([name, check]) => {
+                throw new Error(
+                    "Could not load pipeline stages."
+                );
+            }
 
-                    const row = document.createElement("tr");
 
-                    const status = check.passed
-                        ? "PASS"
-                        : "FAIL";
+            const data =
+                await response.json();
 
-                    const statusClass = check.passed
-                        ? "pass"
-                        : "fail";
+
+            const table =
+                document.getElementById(
+                    "stages"
+                );
+
+
+            table.innerHTML = "";
+
+
+            data.stages.forEach(
+                stage => {
+
+                    const row =
+                        document.createElement(
+                            "tr"
+                        );
+
+
+                    const reasons =
+                        Object.entries(
+                            stage.reasons || {}
+                        )
+                        .map(
+                            ([key, value]) =>
+                                `${key}: ${value}`
+                        )
+                        .join("<br>");
+
 
                     row.innerHTML = `
-                        <td>${name}</td>
-                        <td class="${statusClass}">
-                            ${status}
-                        </td>
+
                         <td>
-                            ${check.actual ?? ""}
+                            ${stage.stage}
                         </td>
+
                         <td>
-                            ${check.expected ?? ""}
+                            ${stage.rows_in}
                         </td>
+
+                        <td>
+                            ${stage.rows_out}
+                        </td>
+
+                        <td>
+                            ${stage.dropped}
+                        </td>
+
+                        <td>
+                            ${reasons || "-"}
+                        </td>
+
                     `;
+
 
                     table.appendChild(row);
                 }
@@ -257,55 +684,411 @@
         }
 
 
-        async function loadSummary() {
+        /*
+         * Load acceptance checks.
+         */
+        async function loadValidation(runId) {
 
-            const response = await fetch(
-                `${API_URL}/summary`
+            const response =
+                await fetch(
+                    `${API_URL}/run/${runId}/validate`
+                );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    "Could not run acceptance checks."
+                );
+            }
+
+
+            const data =
+                await response.json();
+
+
+            const table =
+                document.getElementById(
+                    "checks"
+                );
+
+
+            table.innerHTML = "";
+
+
+            Object.entries(
+                data.checks
+            ).forEach(
+                ([name, check]) => {
+
+                    const row =
+                        document.createElement(
+                            "tr"
+                        );
+
+
+                    const passed =
+                        check.passed === true;
+
+
+                    const status =
+                        passed
+                            ? "PASS"
+                            : "FAIL";
+
+
+                    const statusClass =
+                        passed
+                            ? "pass"
+                            : "fail";
+
+
+                    let actual = "";
+
+
+                    /*
+                     * Normal checks.
+                     */
+                    if (
+                        check.actual !== undefined &&
+                        check.actual !== null
+                    ) {
+
+                        actual =
+                            check.actual;
+                    }
+
+
+                    /*
+                     * Validation checks that
+                     * report invalid row count.
+                     */
+                    if (
+                        check.actual_invalid_rows
+                        !== undefined
+                    ) {
+
+                        actual =
+                            check.actual_invalid_rows === 0
+                                ? "true"
+                                : `${check.actual_invalid_rows} invalid rows`;
+                    }
+
+
+                    let expected = "";
+
+
+                    if (
+                        check.expected !== undefined &&
+                        check.expected !== null
+                    ) {
+
+                        expected =
+                            check.expected;
+                    }
+
+
+                    row.innerHTML = `
+
+                        <td>
+                            ${formatCheckName(name)}
+                        </td>
+
+                        <td class="${statusClass}">
+                            ${status}
+                        </td>
+
+                        <td>
+                            ${actual}
+                        </td>
+
+                        <td>
+                            ${expected}
+                        </td>
+
+                    `;
+
+
+                    table.appendChild(row);
+                }
             );
 
-            const data = await response.json();
+
+            /*
+             * Check whether every acceptance
+             * check passed.
+             */
+            const allPassed =
+                Object.values(
+                    data.checks
+                )
+                .every(
+                    check =>
+                        check.passed === true
+                );
+
+
+            const statusElement =
+                document.getElementById(
+                    "validationStatus"
+                );
+
+
+            if (allPassed) {
+
+                statusElement.innerText =
+                    "All acceptance checks passed.";
+
+
+                statusElement.className =
+                    "pass";
+
+            } else {
+
+                statusElement.innerText =
+                    "One or more acceptance checks failed.";
+
+
+                statusElement.className =
+                    "fail";
+            }
+        }
+
+
+        /*
+         * Load the latest run summary.
+         */
+        async function loadSummary(runId) {
+
+            const response =
+                await fetch(
+                    `${API_URL}/summary`
+                );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    "Could not load run summary."
+                );
+            }
+
+
+            const data =
+                await response.json();
+
 
             const container =
-                document.getElementById("summary");
+                document.getElementById(
+                    "summary"
+                );
 
-            container.innerHTML = "";
 
-            if (data.runs.length === 0) {
+            if (
+                !data.runs ||
+                data.runs.length === 0
+            ) {
 
-                container.innerHTML =
-                    "<p>No runs yet.</p>";
+                container.innerHTML = `
+                    <p class="loading">
+                        No runs yet.
+                    </p>
+                `;
 
                 return;
             }
 
-            const latest =
-                data.runs[data.runs.length - 1];
+
+            /*
+             * Find the requested run instead of
+             * assuming the last run is the latest.
+             */
+            let selectedRun =
+                data.runs.find(
+                    run =>
+                        run.run_id === runId
+                );
+
+
+            /*
+             * Fallback to latest run.
+             */
+            if (!selectedRun) {
+
+                selectedRun =
+                    data.runs[
+                        data.runs.length - 1
+                    ];
+            }
+
 
             container.innerHTML = `
+
                 <div class="summary-card">
+
                     <strong>Rows</strong>
-                    <br>
-                    ${latest.rows}
+
+                    ${selectedRun.rows}
+
                 </div>
 
+
                 <div class="summary-card">
+
                     <strong>Claims</strong>
-                    <br>
-                    ${latest.claims}
+
+                    ${selectedRun.claims}
+
                 </div>
 
+
                 <div class="summary-card">
+
                     <strong>Patients</strong>
-                    <br>
-                    ${latest.patients}
+
+                    ${selectedRun.patients}
+
                 </div>
 
+
                 <div class="summary-card">
+
                     <strong>Diagnosis Codes</strong>
-                    <br>
-                    ${latest.diagnosis_codes}
+
+                    ${selectedRun.diagnosis_codes}
+
                 </div>
+
             `;
+        }
+
+
+        /*
+         * Download final dataset for the
+         * currently displayed run.
+         */
+        async function downloadDataset() {
+
+            const runText =
+                document.getElementById(
+                    "runId"
+                ).innerText;
+
+
+            if (
+                !runText.startsWith("Run ID:")
+            ) {
+
+                alert(
+                    "Please run the pipeline first."
+                );
+
+                return;
+            }
+
+
+            const runId =
+                runText
+                    .replace(
+                        "Run ID:",
+                        ""
+                    )
+                    .trim();
+
+
+            if (!runId) {
+
+                alert(
+                    "Run ID is not available."
+                );
+
+                return;
+            }
+
+
+            const button =
+                document.getElementById(
+                    "downloadButton"
+                );
+
+
+            button.disabled = true;
+
+            button.innerText =
+                "Preparing Download...";
+
+
+            try {
+
+                const response =
+                    await fetch(
+                        `${API_URL}/run/${runId}/download`
+                    );
+
+
+                if (!response.ok) {
+
+                    throw new Error(
+                        "Could not download dataset."
+                    );
+                }
+
+
+                const blob =
+                    await response.blob();
+
+
+                const url =
+                    window.URL.createObjectURL(
+                        blob
+                    );
+
+
+                const link =
+                    document.createElement(
+                        "a"
+                    );
+
+
+                link.href = url;
+
+
+                link.download =
+                    `claims_${runId}.csv`;
+
+
+                document.body.appendChild(
+                    link
+                );
+
+
+                link.click();
+
+
+                link.remove();
+
+
+                window.URL.revokeObjectURL(
+                    url
+                );
+
+
+            } catch (error) {
+
+                console.error(error);
+
+
+                alert(
+                    error.message
+                );
+
+            } finally {
+
+                button.disabled = false;
+
+                button.innerText =
+                    "Download Final Dataset";
+            }
         }
 
     </script>

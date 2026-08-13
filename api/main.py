@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from uuid import uuid4
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from io import StringIO
 from pipeline.pipeline import run_pipeline
 from pipeline.validation import (
     validate_output,
@@ -64,9 +66,7 @@ def validate_run(run_id: str):
 
     results = validate_output(output)
 
-    deterministic = validate_deterministic_run(
-        run_pipeline
-    )
+    deterministic = validate_deterministic_run( output, run_pipeline)
 
     results["deterministic_output"] = deterministic
 
@@ -74,6 +74,7 @@ def validate_run(run_id: str):
         "run_id": run_id,
         "checks": results
     }
+
 
 
 @app.get("/summary")
@@ -96,3 +97,26 @@ def get_summary():
     return {
         "runs": summaries
     }
+    
+@app.get("/run/{run_id}/download")
+def download_output(run_id: str):
+
+    if run_id not in runs:
+        return {
+            "error": "Run not found"
+        }
+
+    output = runs[run_id]["output"]
+
+    csv_data = output.to_csv(index=False)
+
+    file = StringIO(csv_data)
+
+    return StreamingResponse(
+        file,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename=claims_{run_id}.csv"
+        }
+    )
