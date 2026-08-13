@@ -188,6 +188,8 @@ The final pipeline currently produces:
 ```text
 claims-data-harmonization/
 │
+├── analysis/
+│   ├── data_profiling.py
 ├── api/
 │   ├── __init__.py
 │   └── main.py
