@@ -1,250 +1,213 @@
 # Design Notes
 
-## 1. What I Built
+## 1. Pipeline Overview
 
-I built a multi-source claims data harmonization pipeline that takes claims
-data from three vendors and converts them into one consistent structure.
+```mermaid
+flowchart TD
+    A[Source A] --> A1[Standardize]
+    B[Source B] --> B1[Standardize]
+    C[Source C] --> C1[Standardize]
 
-The pipeline has separate stages for:
+    A1 --> A2[Clean & Validate]
+    B1 --> B2[Clean & Validate]
+    C1 --> C2[Resolve Claim Versions]
+    C2 --> C3[Clean & Validate]
 
-1. Loading the source files
-2. Standardizing column names
-3. Cleaning and validating records
-4. Handling Source C claim versions
-5. Normalizing diagnosis codes
-6. Expanding multiple diagnosis codes into separate rows
-7. Looking up diagnosis descriptions
-8. Combining the three sources
-9. Removing duplicates at the required grain
-10. Validating the final output
+    A2 --> D[Diagnosis Processing]
+    B2 --> D
+    C3 --> D
 
-Each stage records the number of rows entering and leaving the stage,
-along with the reason for dropped records.
+    D --> E[Diagnosis Normalization]
+    E --> F[Diagnosis Dictionary Enrichment]
+    F --> G[Combine Sources]
+    G --> H[Final Grain Deduplication]
+    H --> I[Final Dataset]
+    I --> J[Acceptance Validation]
+```
 
-I also built a small FastAPI application around the pipeline. A run gets a
-unique run ID, and the API provides the stage information, acceptance
-checks, summary information, and a download of the final dataset.
+Each stage tracks:
 
----
-
-## 2. What Problem It Solves
-
-The three vendors contained the same general claims information, but they
-did not use the same column names or data formats.
-
-For example, the patient identifier appeared as:
-
-- patient_id in Source A
-- member_id in Source B
-- pt_ref in Source C
-
-The same happened with claim IDs, service dates, diagnosis codes,
-provider identifiers, gender, plans and billing amounts.
-
-The diagnosis representation was also different.
-
-Source A had multiple diagnosis columns:
-
-diagnosis_code_1 through diagnosis_code_8.
-
-Source B had one diagnosis column.
-
-Source C stored multiple diagnosis codes in one string separated by `|`.
-
-Simply concatenating the three files would therefore produce inconsistent
-columns and inconsistent diagnosis records.
-
-The pipeline first converts these different representations into one
-canonical structure and then combines the data.
+```text
+Rows In → Rows Out → Dropped → Drop Reason
+```
 
 ---
 
-## 3. Why I Did It This Way
+## 2. Main Decisions
 
-### Standardization
-
-I standardized the source-specific column names into a common naming scheme
-before combining the sources.
-
-This makes the later processing independent of which vendor produced the
-record.
-
-### Missing patients
-
-Rows without a patient identifier are removed because the assignment
-explicitly requires this.
-
-I applied this before the final combination so invalid records do not
-enter the final dataset.
-
-### Date filtering
-
-I kept only records whose service date falls between:
-
-2018-01-01 and 2025-02-28.
-
-The date is converted into a proper datetime value before the final output.
-
-### Gender
-
-The vendors use different representations.
-
-Source A already uses M/F.
-
-Source B uses numeric values.
-
-Source C uses Male/Female.
-
-These are normalized to M/F.
-
-### Diagnosis codes
-
-Diagnosis codes are converted to uppercase and dots are removed.
-
-For example:
-
-E11.9
-
-becomes:
-
-E119
-
-This is done before the dictionary lookup so the same diagnosis code has
-the same representation across all vendors.
-
-### Source C versions
-
-Source C contains multiple versions of some claims.
-
-I found that Source C contains 24,186 rows, but only 20,001 unique latest
-claim versions.
-
-I chose to keep the latest version of each claim because the version field
-represents revisions of the same claim.
-
-This reduced Source C from 24,186 rows to 20,001 rows.
-
-I made this a separate tracked stage so the dropped 4,185 rows are visible
-instead of silently disappearing.
-
-### Diagnosis expansion
-
-The final grain required by the assignment is one row per:
-
-source + claim + diagnosis code.
-
-Therefore multiple diagnosis codes have to become separate rows.
-
-For Source A, the eight diagnosis columns are converted into rows.
-
-For Source B, the diagnosis column becomes one diagnosis row.
-
-For Source C, the `|` separated diagnosis values are split into individual
-diagnosis rows.
-
-### Diagnosis dictionary
-
-The diagnosis dictionary is used to populate DIAGNOSIS_DESC.
-
-If a diagnosis code is not present in the dictionary, I keep the diagnosis
-record and leave the description missing rather than dropping the claim.
-
-I chose this because the assignment says that not every code appears in
-the dictionary, and dropping a valid claim because the description is
-missing would lose source data.
-
-### Final grain
-
-The final duplicate check uses:
-
-SRC + CLAIM_ID + DIAGNOSIS_CODE
-
-because this is the grain specified by the assignment.
+| Problem Found | Options | What I Chose | Why |
+|---|---|---|---|
+| Different column names across vendors | Combine directly / Standardize first | **Standardize first** | Same information needs the same field name before combining |
+| Source A has 8 diagnosis columns | Keep columns / Convert to rows | **Convert to rows** | Final grain is one row per claim + diagnosis |
+| Source C has `I10\|D64.9\|K21.9` | Keep as string / Split into rows | **Split into rows** | Each diagnosis must become a separate record |
+| Diagnosis codes have dots/lowercase | Keep original / Normalize | **Uppercase + remove dots** | Required output format and consistent dictionary lookup |
+| Source C has multiple claim versions | Keep all / Keep latest | **Keep latest version** | Older versions are superseded records |
+| Missing patient ID | Keep / Drop | **Drop** | Required by assignment |
+| Date outside required range | Keep / Drop | **Drop** | Required range is 2018-01-01 to 2025-02-28 |
+| Different gender formats | Keep vendor format / Normalize | **Normalize to M/F** | One consistent output |
+| Code missing from dictionary | Drop code / Keep code without description | **Keep code** | Missing description does not make the claim invalid |
+| Duplicate definition | Full-row duplicate / Source + Claim + Diagnosis | **SRC + CLAIM_ID + DIAGNOSIS_CODE** | This is the required final grain |
+| Deterministic validation | Run pipeline twice independently / Reuse first output + run once more | **Reuse first output** | Avoids unnecessary first-run processing |
 
 ---
 
-## 4. What Went Wrong Along the Way
+## 3. Source Differences
 
-My first implementation of the diagnosis enrichment logic had a problem
-when the dictionary was merged more than once.
+| Field | Source A | Source B | Source C |
+|---|---|---|---|
+| Patient | `patient_id` | `member_id` | `pt_ref` |
+| Claim | `claim_id` | `encounter_id` | `claim_ref` |
+| Date | `service_from_date` | `svc_date` | `date_of_service` |
+| Diagnosis | 8 columns | 1 column | `\|` separated |
+| Gender | M/F | 1/2 | Male/Female |
+| ZIP3 | `patient_zip3` | `zip3` | `zip_3` |
+| Rendering | `provider_rendering_id` | `rendering_npi` | `npi_rendering` |
+| Referring | `provider_referring_id` | `referring_npi` | `npi_referring` |
+| Billing | `provider_billing_id` | `billing_npi` | `npi_billing` |
+| Primary Plan | `primary_plan_id` | `payer_primary` | `plan_1` |
+| Billed Amount | `bill_amt` | `billed_amount` | `amount_billed` |
 
-The merge created columns such as `dx_code_x` and `dx_code_y`, which caused
-the cleanup code to try to remove a column that no longer existed.
-
-I fixed this by making the diagnosis enrichment step consistent about
-which diagnosis column is retained.
-
-I also changed Source C version handling to return information about how
-many rows were removed. This allowed the pipeline tracker to show the
-version-resolution stage separately.
-
-The final pipeline currently produces:
-
-- 159,704 final rows
-- 68,205 distinct claims
-- 11,963 distinct patients
-- 44 distinct diagnosis codes
-
-For P00042, the final output contains 7 rows and 7 distinct diagnosis
-codes.
-
-These values match the acceptance values provided in the assignment.
+The first step is therefore to convert these into a common structure.
 
 ---
 
-## 5. What I Was Not Sure About
+## 4. Source C Version Decision
 
-The main ambiguity I found was how Source C's version field should be
-interpreted.
+This was the main unusual behavior I found while inspecting the data.
 
-There are multiple versions of the same claim, so keeping every version
-would retain superseded records.
+| Check | Result |
+|---|---:|
+| Original Source C rows | 24,186 |
+| Claims with multiple versions | 3,525 |
+| Rows after version resolution | 20,001 |
+| Superseded rows removed | 4,185 |
 
-I tested the behavior and found that keeping the latest version produces
-the expected final row and claim counts.
+### Decision
 
-I therefore chose latest-version processing.
+```text
+24,186 rows
+     ↓
+Group by claim
+     ↓
+Keep latest version
+     ↓
+20,001 rows
+```
 
-If this were a production pipeline, I would confirm this rule with the
-data owner rather than relying only on the observed data.
+The removed records are tracked as:
 
-Another assumption is that diagnosis codes missing from the dictionary
-should remain in the output with a missing description. I chose this to
-avoid losing otherwise valid claims.
+```text
+superseded_claim_version
+```
 
----
-
-## 6. What I Would Do Differently
-
-The current implementation is designed for the assignment and moderate
-data volumes.
-
-For a much larger dataset, I would avoid keeping the entire pipeline
-output in application memory.
-
-I would also consider:
-
-- streaming or chunked file processing
-- persistent storage for run information
-- storing pipeline outputs in object storage
-- database-backed run metadata
-- structured logging
-- more detailed data-quality metrics
-- configuration-driven source mappings
-- better monitoring and error handling
-
-The current API stores runs in memory because persistence was not required
-for this assignment.
-
-I also added lazy CSV generation. The final CSV is only created when the
-user requests a download. Once created, later downloads reuse the existing
-file.
+I chose this instead of keeping every version because multiple versions represent revisions of the same claim.
 
 ---
 
-## 7. Final Pipeline Result
+## 5. Diagnosis Decision
 
-The final pipeline currently produces:
+### Source A
+
+```text
+diagnosis_code_1
+diagnosis_code_2
+...
+diagnosis_code_8
+```
+
+→ Convert columns into diagnosis rows.
+
+### Source B
+
+```text
+dx_code
+```
+
+→ Directly normalize into `DIAGNOSIS_CODE`.
+
+### Source C
+
+```text
+I10|D64.9|K21.9
+```
+
+→ Split into:
+
+```text
+I10
+D649
+K219
+```
+
+### Common normalization
+
+```text
+Trim
+ ↓
+Uppercase
+ ↓
+Remove "."
+```
+
+Example:
+
+```text
+e11.9 → E119
+```
+
+---
+
+## 6. Dictionary Decision
+
+| Problem | Options | Decision | Why |
+|---|---|---|---|
+| Diagnosis code not found in dictionary | Drop / Keep | **Keep** | The claim is still valid |
+| Description unavailable | Drop claim / Leave description empty | **Leave empty** | Avoid losing source data |
+
+The dictionary is used only to enrich:
+
+```text
+DIAGNOSIS_CODE → DIAGNOSIS_DESC
+```
+
+---
+
+## 7. Data Validation Decisions
+
+| Rule | Decision |
+|---|---|
+| Missing `PATIENT_ID` | Drop |
+| Service date before 2018-01-01 | Drop |
+| Service date after 2025-02-28 | Drop |
+| Gender | Convert to M/F |
+| Diagnosis code | Uppercase + no dots |
+| Source | SRC_A / SRC_B / SRC_C |
+| Final grain | SRC + CLAIM_ID + DIAGNOSIS_CODE |
+
+---
+
+## 8. Problems During Development
+
+| Problem | What I Found | Fix |
+|---|---|---|
+| `KeyError: dx_code` | Dictionary merge created `dx_code_x` / `dx_code_y` | Made diagnosis-column handling explicit after merge |
+| `tuple has no attribute copy` | Source C function returned `(df, tracking)` while caller expected `df` | Updated callers to handle the return values |
+| Source C counts were incorrect | Multiple claim versions were being processed | Added separate version-resolution stage |
+| Deterministic validation was doing unnecessary work | First output was already available | Reused first output and ran pipeline only once more |
+
+---
+
+## 9. Things I Was Unsure About
+
+| Question | My Decision | What I Would Confirm |
+|---|---|---|
+| What does Source C `version` mean? | Keep latest version | Confirm with data owner |
+| What to do with codes missing from dictionary? | Keep code, empty description | Confirm expected business rule |
+| Should missing descriptions fail validation? | No | Confirm if required in production |
+
+---
+
+## 10. Final Result
 
 | Metric | Result |
 |---|---:|
@@ -252,12 +215,30 @@ The final pipeline currently produces:
 | Distinct claims | 68,205 |
 | Distinct patients | 11,963 |
 | Distinct diagnosis codes | 44 |
-| P00042 diagnosis codes | 7 |
 | P00042 total rows | 7 |
+| P00042 distinct diagnosis codes | 7 |
+| Automated tests | 18 passed |
 
-The pipeline also reports stage-level row counts and drop reasons through
-the API.
+### Rows by Source
 
-The acceptance endpoint checks the final output against the required
-acceptance criteria and also checks that two pipeline executions produce
-identical output.
+| Source | Rows |
+|---|---:|
+| SRC_A | 67,531 |
+| SRC_B | 52,819 |
+| SRC_C | 39,354 |
+| **Total** | **159,704** |
+
+---
+
+## 11. What I Would Improve
+
+| Current | If Data Became 100x Larger |
+|---|---|
+| DataFrames in memory | Chunked/streaming processing |
+| Run information in memory | Database-backed run history |
+| Local generated CSV | Object storage |
+| Synchronous pipeline | Background jobs |
+| Basic logging | Structured logging and monitoring |
+| Source mappings in code | Configuration-driven mappings |
+
+The current implementation is intentionally kept simple for the assignment data.
