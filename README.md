@@ -147,7 +147,7 @@ The frontend allows the user to:
 
 ### Acceptance Checks
 
-![Acceptance Checks](screenshots/acceptance-checks.png)
+![Acceptance Checks](screenshots/acceptance-check.png)
 
 ---
 
