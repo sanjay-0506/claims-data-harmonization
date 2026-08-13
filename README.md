@@ -223,7 +223,7 @@ claims-data-harmonization/
 │
 ├── screenshots/
 │   ├── pipeline-run.png
-│   └── acceptance-checks.png
+│   └── acceptance-check.png
 │
 ├── DESIGN_NOTES.md
 ├── README.md
