@@ -100,6 +100,31 @@ Drop Reasons
 
 ## 4. Running the Application
 
+### Clone the Repository
+
+```bash
+git clone https://github.com/sanjay-0506/claims-data-harmonization.git
+cd claims-data-harmonization
+```
+
+### Create Virtual Environment
+
+```bash
+python -m venv .venv
+```
+
+Activate it on Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+### Install Requirements
+
+```bash
+pip install -r requirements.txt
+```
+
 ### Backend
 
 From the project root:
@@ -116,7 +141,13 @@ http://127.0.0.1:8000
 
 ### Frontend
 
-Open another terminal:
+Open another terminal and activate the virtual environment if needed:
+
+```bash
+.venv\Scripts\activate
+```
+
+Then run:
 
 ```bash
 python -m http.server 5500 --directory frontend
@@ -247,7 +278,7 @@ pytest -q
 Current result:
 
 ```text
-18 passed
+20 passed
 ```
 
 The test cases cover:
