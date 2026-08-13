@@ -147,7 +147,7 @@ The frontend allows the user to:
 
 ### Acceptance Checks
 
-![Acceptance Checks](screenshots/acceptance-checks.png)
+![Acceptance Checks](screenshots/acceptance-check.png)
 
 ---
 
@@ -223,7 +223,7 @@ claims-data-harmonization/
 │
 ├── screenshots/
 │   ├── pipeline-run.png
-│   └── acceptance-checks.png
+│   └── acceptance-check.png
 │
 ├── DESIGN_NOTES.md
 ├── README.md
